@@ -1,4 +1,19 @@
-import string
+"""
+Copyright 2019 Nadheesh Jihan
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+"""
+
 import warnings
 
 import nltk
@@ -7,10 +22,7 @@ import pandas as pd
 import tensorflow as tf
 from keras import layers, models
 from keras.layers import GRU
-from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import Tokenizer
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
 from sklearn.metrics import precision_recall_fscore_support
 from termcolor import colored
 
@@ -25,21 +37,11 @@ tf.set_random_seed(seed)
 
 df = pd.DataFrame()
 df = pd.read_csv('../../../data/triple_with_stv.csv')
-triple_lines = list()
 lines = df['triple'].values.tolist()
 stv = df['stv'].values.reshape(-1, 1)
+truth = df['truth'].values
 
-for line in lines:
-    tokens = word_tokenize(line)
-    tokens = [w.lower() for w in tokens]
-    table = str.maketrans('', '', string.punctuation)
-    stripped = [w.translate(table) for w in tokens]
-    words = [word for word in stripped if word.isalpha()]
-    stop_words = set(stopwords.words('english'))
-    words = [w for w in words if not w in stop_words]
-    triple_lines.append(words)
-
-print(colored(len(triple_lines), 'green'))
+triple_lines = [line.split() for line in lines]
 
 EMBEDDING_DIM = 200
 
@@ -57,14 +59,9 @@ print(colored(sequences, 'green'))
 
 # pad sequences
 word_index = tokenizer_obj.word_index
-max_length = 9
+max_length = 5  # should be 3 for Yago
 
-triple_pad = pad_sequences(sequences, maxlen=max_length)
-truth = df['truth'].values
-print('Shape of triple tensor: ', triple_pad.shape)
-print('Shape of truth tensor: ', truth.shape)
-
-# map embeddings from loaded word2vec model for each word to the tokenizer_obj.word_index vocabulary & create a wordvector matrix
+triple_pad = np.array(sequences)
 
 num_words = len(word_index) + 1
 
@@ -72,16 +69,13 @@ print(colored(num_words, 'cyan'))
 
 input1 = layers.Input(shape=(max_length,))
 embedding = layers.Embedding(vocab_size, EMBEDDING_DIM, input_length=max_length)(input1)
-
 pooling = GRU(units=64, dropout=0.2, recurrent_dropout=0.2)(embedding)
 
-# cov = layers.Conv1D(128, 4, activation='relu')(embedding)
-# pooling = layers.GlobalMaxPooling1D()(cov)
-
 input2 = layers.Input(shape=(1,))
-
 concat = layers.Concatenate(axis=-1)([pooling, input2])
 
+# l1 = layers.Dense(64, activation='relu')(concat)
+# dropout = layers.Dropout(0.1)(l1)
 out = layers.Dense(1, activation='sigmoid')(concat)
 
 model = models.Model(inputs=[input1, input2], outputs=[out])
@@ -112,10 +106,10 @@ print('Shape of y_test tensor: ', y_test.shape)
 
 print(colored('Training...', 'green'))
 
-history = model.fit([X_train_pad, X_train_psl], y_train, batch_size=128, epochs=25,
+history = model.fit([X_train_pad, X_train_psl], y_train, batch_size=128, epochs=12,
                     validation_data=([X_test_pad, X_test_psl], y_test), verbose=2)
 
-y_pred = (model.predict(x=[X_test_pad, X_test_psl]) > 0.5).astype(np.int32)
+y_pred = (model.predict(x=[X_test_pad, X_test_psl]) > 0.3).astype(np.int32)
 metrics = precision_recall_fscore_support(y_test, y_pred, average='weighted')
 
 print()
@@ -124,7 +118,9 @@ print(colored("Recall: ", 'green'), colored(metrics[1], 'blue'))
 print(colored("F1: ", 'green'), colored(metrics[2], 'blue'))
 
 import matplotlib.pyplot as plt
+
 plt.style.use('ggplot')
+
 
 def plot_history(history):
     acc = history.history['acc']
@@ -144,5 +140,6 @@ def plot_history(history):
     plt.plot(x, val_loss, 'r', label='Validation loss')
     plt.title('Training and validation loss')
     plt.legend()
+
 
 plt.show(plot_history(history))
